@@ -25,4 +25,4 @@ O desafio porposto é:
 ● Proveja uma breve explicação dos fatores que o modelo tem levado em conta e como eles influenciam nas previsões.  
 ● Proveja uma avaliação da performance do modelo.  
 
-Para a Solução do problema, buscou-se modelar um modelo de Árvore de Decisão (Decission tree)
+Para a Solução do problema, buscou-se modelar um modelo de Árvore de Decisão (Decission tree), o modelo considerou apenas as variaveis Lifetime Value (LTV) e valor Final da compra. O modelo apresentou uma acurácia de 98,11%.
