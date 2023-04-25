@@ -19,8 +19,10 @@ A partir de dois conjuntos de dados, onde o primeiro é uma base é de vendas da
 
 A segunda base é umaa tabela com informações demográficas sobre os clientes (Bairro, Cidade e Estado).
 
-● O desafio porposto é:  
+O desafio porposto é:  
 ● Desenvolver um modelo que prediga quais clientes são mais prováveis de recomprar nas próximas 2 semanas.  
 ● Listar os clientes de mais prováveis a menos prováveis em termos de propensão a recompra.  
 ● Proveja uma breve explicação dos fatores que o modelo tem levado em conta e como eles influenciam nas previsões.  
 ● Proveja uma avaliação da performance do modelo.  
+
+Para a Solução do problema, buscou-se modelar um modelo de Árvore de Decisão (Decission tree)
