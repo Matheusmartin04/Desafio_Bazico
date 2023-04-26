@@ -1,0 +1,370 @@
+---
+title: "Relatório Bázico"
+author: "Matheus Martins Santos"
+date: "2023-04-22"
+output: 
+  pdf_document:
+    fig_caption: yes
+    fig_crop: yes
+    fig_height: 5
+    fig_width: 7
+    keep_tex: yes
+    number_sections: no
+    toc: yes
+---
+
+
+# Desafio
+
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>A partir de um conjunto de dados de compras passadas de clientes, desenvolva um modelo capaz de prever quais clientes são mais prováveis de realizar uma recompra nas próximas duas semanas. O modelo pode levar em conta diversos fatores como histórico de compras, dados demográficos e preferências de produtos.  
+
+A partir de dois conjuntos de dados, onde o primeiro é uma base é de vendas da empresa, com as seguintes colunas:
+
+O desafio porposto é:  
+ * Desenvolver um modelo que prediga quais clientes são mais prováveis de recomprar nas próximas 2 semanas.  
+ * Listar os clientes de mais prováveis a menos prováveis em termos de propensão a recompra.  
+ * Proveja uma breve explicação dos fatores que o modelo tem levado em conta e como eles influenciam nas previsões.  
+ * Proveja uma avaliação da performance do modelo.</p>
+</div>
+
+# Passos iniciais
+## Bibliotecas
+```{r pacotes, eval=TRUE, echo=TRUE, include=TRUE, message=FALSE, warning=FALSE}
+library(readxl) # importar dados do Excel para o R
+library(dplyr) # pacote para manipulação de dados
+library(tidyverse) # para visualizações
+library(stats) # pacote para realização de testes de normalidade
+library(nortest) # pacote para realização de testes de normalidade
+library(rpart) # pacote para construção de árvores de decisão
+library(rpart.plot) # pacote para visualização de árvores de decisão construídas com o rpa
+library(knitr) # Usado para produzir relatórios dinâmicos e reprodutíveis
+library(kableExtra) # pacote é usado para produzir tabelas atraentes e personalizadas
+library(DT) # para imprimir a tabeça
+library(corrplot) # para calcular as correlações
+library(reshape2) # para auxiliar com data.frame
+```
+  
+## Importando dados
+```{r Leitura dos dados, eval=TRUE, echo=TRUE, warning=FALSE}
+setwd("F:\\bazico") # Diretorio de trabalho
+clientes <- read_excel("clientes.xlsx")
+vendas_de_produtos <- read_excel("vendas_de_produtos.xlsx")
+```
+
+## Preparação dos Dados
+```{r  Preparação dos dados, eval=TRUE, echo=TRUE, warning=FALSE}
+## convertendo as variaveis em numerico e fatores, númericas e Data
+vendas_de_produtos$ID_Cliente = as.factor(vendas_de_produtos$ID_Cliente)
+vendas_de_produtos$ID_Produto = as.factor(vendas_de_produtos$ID_Produto)
+vendas_de_produtos$ID_Pedido = as.factor(vendas_de_produtos$ID_Pedido)
+
+vendas_de_produtos$Quantidade = as.numeric(vendas_de_produtos$Quantidade)
+vendas_de_produtos$Desconto = as.numeric(vendas_de_produtos$Desconto)
+vendas_de_produtos$Frete = as.numeric(vendas_de_produtos$Frete)
+vendas_de_produtos$Total_do_Pedido = as.numeric(vendas_de_produtos$Total_do_Pedido)
+vendas_de_produtos$Data <- as.Date(vendas_de_produtos$Data)
+```
+  
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>Foi preciso converter os dados originais em fatores para as variaveis de (ID_Cliente,ID_Produto,ID_Pedido), da mesma forma foi convertido em variáveis númericas (Quantidade,Desconto,Frete,Total_do_Pedido) e em formato de Data a variavel (Data).</p>
+</div>
+  
+## Organizando base Para trabalhar
+  
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>Em seguida, tive o objetivo de consolidar a base, onde foi agrupada por cliente e por Data de compra, com isso teria uma visão maior sobre o quanto o cliente comprou e o quanto pagou pelas compras, a quantidade de visitas na loja (Variável importante para definir se o cliente já fez um recompra na loja). Por fim, buscou juntar as informações de cada cliente com a localidade que o cliente reside, com base na tabela "Cliente".</p>
+</div>
+  
+```{r, echo=TRUE, eval=TRUE, message=FALSE}
+# Agrupando base por cliente e Data de compra;
+# em seguinda, soma a quantidade de produto que o cliente comprou
+# Soma o valor unitario de cada produto
+# Calcula os descontos e frete
+base1 <- vendas_de_produtos %>% 
+  mutate(valor_compra = Quantidade * Preço_Unitário) %>%
+  group_by(ID_Cliente, Data) %>% 
+  summarise(Quantidade = sum(Quantidade), 
+            valor_compra = sum(valor_compra), 
+            Desconto = mean(Desconto), 
+            Frete = mean(Frete))
+
+# Calculando o valor final da compra por cliente e data
+# criando a variavel LifeTime value (LTV)
+base1 <- base1 %>% 
+  mutate(valor_final_compra = (valor_compra - Desconto + Frete)) %>% 
+  group_by(ID_Cliente) %>% 
+  mutate(LTV = sum(valor_final_compra))
+
+# Conta a quantidade de vezes que o cliente comprou na loja
+base1 <- base1 %>%
+  group_by(ID_Cliente) %>%
+  mutate(quantidade_compras = n())
+
+## Criando a variavel 'Recompra" que representa seo cliente já comprou ou não na loja
+base1 <- base1 %>%
+  group_by(ID_Cliente) %>%
+  mutate(Recompra_Loja = ifelse(quantidade_compras >= 2, "Sim","Não"))
+
+## Juntando a base organizada com a base de clientes
+base <- merge(clientes,base1 ,by = "ID_Cliente")
+base <- na.omit(base) # retira os valores faltantes.
+
+# Convertendo variaveis em fator
+base$Bairro <-  as.factor(base$Bairro)
+base$Cidade <-  as.factor(base$Cidade)
+base$Estado <-  as.factor(base$Estado)
+base$Recompra_Loja = factor(base$Recompra_Loja, levels = c("Sim","Não"))
+```
+  
+# Obtendo Insights
+
+## Distribuição do LifeTime Value (LTV)
+
+```{r histograma, echo=FALSE, eval=TRUE, include=T, message=FALSE, results = "asis", warning=FALSE}
+# Adicionando o resultado do teste de normalidade no gráfico
+ggplot(base, aes(x = LTV)) +
+  geom_histogram(binwidth = 1000, color = "white", fill = "darkblue") +
+  labs(title = " ", x = "LTV", y = "Frequencia") + theme_classic()+
+  scale_x_continuous(limits = c(0,25000), breaks = seq(0,25000, 2000))
+
+```
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>Conforme o gráfico acima, onde representa a distribuição do LifeTime Value - LTV, muito cliente gastaram um total ao longo da sua vida um valor acumulado menor que R\$ 2.000,00, fazendo com que existe uma grande frequência nesse grupo, quando o LTV é maior que R\$ 2.000,00, o número de cliente vai diminuir consideravelmente, mas existe cliente que compram muitos, podendo ter valores superiores a R\$ 20.000,00 </p>
+</div>
+
+## Matriz de correlação das variáveis númericas
+```{r M_correlacao, echo=FALSE, eval=TRUE, include=T, message=FALSE, results = "asis", warning=FALSE}
+base %>% 
+  select(Quantidade, Desconto,valor_compra, Frete, valor_final_compra, LTV) %>% 
+  cor() %>%  melt() %>% 
+  ggplot(aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile() + 
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x = "", y = "", title = "Matriz de correlação")+
+  geom_text(aes(label = round(value, 2)), color = "black", size = 3)
+```
+  
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>Com base na matriz de correlação apresentada, podemos fazer as seguintes observações:
+
+* A quantidade de itens comprados ("Quantidade") tem uma forte correlação positiva com o valor da compra final ("valor_final_compra"), indicando que quanto mais itens são comprados, maior é o valor final da compra.
+* A quantidade de itens comprados também tem uma correlação positiva forte com o valor da compra ("valor_compra").
+* O desconto dado na compra ("Desconto") tem uma correlação positiva fraca com o valor da compra final ("valor_final_compra"), indicando que quanto maior o desconto, menor é o valor final da compra, mas essa correlação não é muito forte.
+* O frete ("Frete") tem uma correlação negativa fraca com o valor da compra final ("valor_final_compra"), o que sugere que o aumento do frete pode levar a uma diminuição no valor final da compra, mas essa correlação não é muito forte.
+* O "LTV" (Lifetime Value) tem uma correlação positiva fraca com todas as outras variáveis, indicando que os clientes com maior LTV tendem a comprar mais itens, a gastar mais e a receber mais descontos.</p>
+</div>
+
+## avaliando a base de cliente por Cidade/Estado
+
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>Com base na Tabela 1, cerca de 6340 (85,46%) do cliente são residentes do Estados de Sergipe, os clientes gastaram em média R\$ 1.193,17 em ao longo da sua vida com os produtos da Bázico, além disso, cerca de 50% dos cliente de Sergipe gastaram até R\$ 683,80. A Tabela 2, mostra as top 15 Cidades que apresentaram com mais clientes da Bázico, a capital de Sergipe, Aracaju possui cerca de 6098 (82,34%), os clientes gastaram em média R\$ 1.205,97 em ao longo da sua vida com os produtos da Bázico, além disso, cerca de 50% dos cliente de Sergipe gastaram até R\$ 692,00.</p>
+</div>
+
+
+```{r estatistica por Estado, echo=FALSE, eval=TRUE, include=T, message=FALSE, results = "asis"}
+tabela <- base %>%
+  group_by(Estado) %>%
+  summarise(quantidade_clientes = n(), 
+            percentual_clientes = paste0(round(n()/nrow(base)*100,2), "%"),
+            média_LTV = round(mean(LTV), 2), 
+            Mediana_LTV = round(median(LTV), 2)) %>%
+  arrange(desc(quantidade_clientes))
+
+kable(tabela, col.names = c("Estado", "Quantidade de Cliente", 
+                            "% Cliente", "Média LTV", "Mediana LTV"),
+      align = 'lcccc', caption = "Estatistica por estado") %>%
+  kable_styling(full_width = F,
+                bootstrap_options = c("striped", "hover", 
+                                      "condensed", "responsive"),
+                fixed_thead = T, font_size = 11)
+```
+  
+  
+```{r Top 10 Cidade, echo=FALSE, eval=TRUE, include=T, message=FALSE, results = "asis"}
+tabela <- base %>%
+  group_by(Cidade) %>%
+  summarise(quantidade_clientes = n(), 
+            percentual_clientes = paste0(round(n()/nrow(base)*100,2), "%"),
+            média_LTV = round(mean(LTV), 2), 
+            Mediana_LTV = round(median(LTV), 2)) %>%
+  arrange(desc(quantidade_clientes)) %>%
+  slice(1:10)
+
+kable(tabela, col.names = c("Cidade", "Quantidade de Cliente", 
+                            "% Cliente", "Média LTV", "Mediana LTV"),
+      align = 'lcccc', caption = "Top 10 Cidades: Estatistica") %>%
+  kable_styling(full_width = F,
+                bootstrap_options = c("striped", "hover", 
+                                      "condensed", "responsive"),
+                fixed_thead = T, font_size = 11)
+```
+\newpage
+
+
+# Árvore de Decisão - Decision Tree
+## dividindo a base em treino e teste
+
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p> Foi considerando uma proporção de 80% para a base de treinamento, assim o modelo terá mais dados para poder aprender.</p>
+</div>
+```{r dividindo a base em treino e teste, eval=TRUE, echo=TRUE, warning=FALSE}
+# definir a proporção do conjunto de treinamento
+prop_treino <- 0.8
+
+# definir uma semente aleatória para reprodutibilidade
+set.seed(124)
+# criar um vetor de índices aleatórios para dividir a base em treino e teste
+indices <- sample(nrow(base), nrow(base)*prop_treino)
+
+# selecionar as observações para o conjunto de treinamento
+dados_treino <- base[indices,]
+
+# selecionar as observações para o conjunto de teste
+dados_teste <- base[-indices,]
+```
+  
+## Gerando o modelo com a base de treinamento
+```{r Gerando o modelo, eval=TRUE, echo=TRUE, warning=FALSE}
+# MODELO DE arvore de Decisão ====
+fit = rpart(Recompra_Loja ~ Data+Quantidade+Desconto+Frete+valor_final_compra+LTV,
+            method = "class",
+            data = dados_treino)
+```
+  
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p> Esse é um modelo de árvore de decisão construído com base nos dados de treinamento da variável "Recompra_Loja" em função das seguintes variáveis: "Cidade", "Estado", "Quantidade", "Desconto", "Frete", "valor_final_compra" e "LTV". O modelo final contém apenas duas variáveis: "valor_final_compra" e "LTV". Isso sugere que essas duas variáveis são as mais importantes na predição da variável "Recompra_Loja". Abaixo é mostrado um gráfico da variáveis importante considerados no modelo</p>
+</div>
+  
+```{r grafico 1, eval=TRUE, echo=TRUE, warning=FALSE, fig.align='center', fig.height=4, fig.width=6}
+barplot(fit$variable.importance)
+```
+  
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p> A taxa de erro do nó raiz é de 0,25506, o que significa que o modelo tem uma taxa de acerto de cerca de 74,5%. O modelo foi podado usando validação cruzada com um parâmetro de complexidade (CP) de 0,506287, o que resultou em um modelo com cinco nós terminais.</p>
+</div>
+
+\begin{table}[h]
+\centering
+\caption{Parametros Complexos do modelo}
+\label{tabela 3:Parametros Complexos do modelo}
+\begin{tabular}{lllll}
+\hline
+\textbf{CP} & \textbf{nsplit} & \textbf{rel error} & \textbf{xerror} & \textbf{xstd} \\ \hline
+0.50628723 & 0 & 1.00000000 & 1.00000000 & 0.022203795 \\ 
+0.14791529 & 1 & 0.49371277 & 0.46988749 & 0.016544083 \\ 
+0.03342158 & 3 & 0.19788220 & 0.15155526 & 0.009819573 \\ 
+0.02481800 & 5 & 0.13103905 & 0.12905361 & 0.009088343 \\ 
+0.01654533 & 7 & 0.08140304 & 0.10655195 & 0.008282573 \\ 
+0.01000000 & 9 & 0.04831238 & 0.06618134 & 0.006562037 \\ \hline                     
+\end{tabular}
+\end{table}
+
+
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p> A tabela de CPs mostra os valores do parâmetro de complexidade que foram testados durante a poda do modelo. A medida que o CP diminui, mais nós são adicionados à árvore, aumentando a complexidade do modelo. A medida que o CP aumenta, mais nós são podados, diminuindo a complexidade do modelo e evitando o overfitting. O valor de CP que produziu o modelo final foi de 0,01.. Abaixo é apresetado um gráfico dos CP e o Erro relativo</p>
+</div>
+
+```{r grafico 2, eval=TRUE, echo=TRUE, warning=FALSE, fig.align='center', fig.height=4, fig.width=6}
+plotcp(fit)
+```
+
+## Plotando o modelo
+```{r grafico 3, eval=TRUE, echo=TRUE, warning=FALSE, fig.align='center', fig.height=10, fig.width=12}
+rpart.plot(fit, # method graph
+           type = 0,
+           extra = 100,
+           box.palette = 'GnBu',
+           branch.lty = 2,
+           shadow.col = "gray",
+           nn = TRUE,
+           cex = 1)
+```
+
+## Interpretação do modelo
+
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p> Esse modelo foi modelado para prever se um cliente fará uma recompra ou não com base em duas variáveis: LTV (Lifetime Value, valor de vida útil) e valor final da recompra. A árvore tem um nó raiz, que contém o total de observações usadas para construir o modelo (5924), a proporção de observações que fizeram uma recompra (0.745) e a proporção que não fizeram uma recompra (0.255).
+
+Se a primeira decisão for verdadeira, o modelo segue para o segundo nó, que testa se o valor final da compra é menor que 357, se for verdadeira, o modelo prevê que o cliente fará uma recompra(prob = 100%), caso contrário, se a valor final da compra for maior 357 (2º nó) o modelo parte para o %º nó, onde vai testar se o LTV é maior ou igual que 719, se for, o modelo prevê que o cliente fará uma recompra(prob = 94,71%), se não, o modelo segue para o 11º nó onde vai testar o LTV é maior ou igual que 477, se for falsa, ,o modelo prevê que o cliente não fará uma recompra (prob = 94,82), mas se for verdadeira, o modelo segue para o 22º nó, onde vai testar se o valor final da compra é menor que 494, se for verdadeira, o modelo prevê que o cliente fará uma recompra(prob = 100%), caso contrário prevê que o cliente não fará uma recompra (prob = 83,09%).
+
+
+Se LTV for menor que 357, a árvore segue para o terceiro nó, que testa se o LTV é maior ou igual a 158. Se for menor, a árvore prevê que o cliente não fará uma compra (prob = 51,7%), caso contrário, a árvore segue para o 6º nó, que testa se o valor final da compra é menor que 168, se for o caso, o árvore prevê que o cliente fará uma recompra (prob = 99,5), caso contrário, se o valor final da compra for maior que 168, o modelo segue para o 13º nó, onde testa se o LTV é maior ou igual a 288, se for menor, a árvore prevê que o cliente não fará uma recompra (prob = 99,5%), se for maior, o modelo segue para o 26º nó, que testa se o valor final da compra é menor que 266, se for o caso, a árvore prevê que o cliente fará uma recompra (prob = 100%), caso contrário o modelo prevê que o cliente não fará uma recompra (prob = 100%).</p>
+</div>
+
+## Predição
+## Utilizado o modelo treinado com a base teste para testar se o modelo está fazendo boa previsões.
+```{r predicao, eval=TRUE, echo=TRUE, warning=FALSE, fig.align='center', fig.height=10, fig.width=12}
+predicao_teste <- predict(fit, newdata = dados_teste, type = "class")
+```
+
+## Matriz de confusão
+```{r Matriz de confusao, eval=TRUE, echo=TRUE, warning=FALSE, fig.align='center', fig.height=10, fig.width=12}
+matriz_confusao <- table(predicao_teste, dados_teste$Recompra_Loja)
+```
+
+\begin{table}[h]
+\centering
+\caption{Matriz de confusão}
+\label{tabela 4: Matriz de confusao}
+\begin{tabular}{ccc}
+\hline
+\textbf{Valores Previstos} & \textbf{Sim} & \textbf{Não} \\ \hline
+Sim & 1082 & 10 \\ 
+Não & 18 & 372 \\ \hline                     
+\end{tabular}
+\end{table}
+  
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>Interpretando a matriz de confusão, temos que:
+
+ * O modelo classificou corretamente 1082 clientes como verdadeiros positivos, ou seja, previu corretamente que esses clientes farão uma recompra.
+ * O modelo classificou corretamente 372 clientes como falso verdadeiro, ou seja, previu corretamente que esses clientes não farão uma recompra.
+ * O modelo classificou incorretamente 10 clientes como falsos positivo, ou seja, previu incorretamente que esses clientes farão uma recompa, quando na verdade eles não fizeram.r
+ * O modelo classificou incorretamente 18 clientes como falsos negativos, ou seja, previu incorretamente que esses clientes não farão uma recompra, quando na verdade eles fizeram.s.</p>
+</div>
+  
+## Acurácia
+```{r acuracia, eval=TRUE, echo=TRUE, warning=FALSE, fig.align='center', fig.height=10, fig.width=12}
+acuracia <- sum(diag(matriz_confusao))/sum(matriz_confusao)
+round(acuracia,4)*100
+```
+
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>A acurácia é uma métrica de avaliação de modelos de classificação que mede a proporção de observações classificadas corretamente pelo modelo em relação ao total de observações. Em outras palavras, a acurácia representa a capacidade do modelo de classificar corretamente as observações em todas as classes. Desse modo, o modelo apresentou uma acertividade de 98,11% das observações.</p>
+</div>
+
+## Prevendo as probabilidades dos clientes fazer uma recompra
+```{r probabilidade_teste, eval=TRUE, echo=TRUE, warning=FALSE, fig.align='center', fig.height=10, fig.width=12}
+# fazer a previsão das probabilidades de recompra para o conjunto de teste
+probabilidade_teste <- predict(fit, newdata = dados_teste, type = "prob")
+```
+## Juntando as probabilidades ao conjuntos de teste e imprimindo a lista do cliente mais provavéis
+
+```{r imprimindo, eval=TRUE, echo=TRUE, warning=FALSE} 
+# juntar as probabilidades previstas ao conjunto de teste
+dados_teste_com_prob <- cbind(dados_teste, probabilidade_teste[,1])
+
+# renomeando nome da coluna
+colnames(dados_teste_com_prob)[ncol(dados_teste_com_prob)] <- "probabilidade_recompra"
+
+# imprimindo a tabela
+df <- dados_teste_com_prob %>% 
+  select(ID_Cliente, probabilidade_recompra) %>% 
+  group_by(ID_Cliente) %>% 
+  summarise(probabilidade = round(mean(probabilidade_recompra),4)) %>% 
+  arrange(desc(probabilidade))
+
+kable(head(df,10),caption = 'Top 10 Cliente mais propensos de fazer uma recompra', 
+      align = 'cc') %>% 
+  kable_styling(full_width = F, 
+                bootstrap_options = c("striped", "hover", "condensed", "responsive"),  
+                fixed_thead = T)
+```
+
+<div style="text-align: justify; text-indent: 1.25cm; font-size: 12pt; line-height: 1.5;">
+<p>Na tabela 5 foi impresso apenas os top 10 clientes mais propensos a fazer uma recompra na loja, para poder ter acesso a todos os clientes é só seguir <a href="Relatorio_Bazico.html"> clincando no link: https://rpubs.com/Matheusmartin04/1034064. Ao clicar nesse link, leva para uma versão desse documento em HTML, e no final do documento, tem todos os cliente impressos.</p>
+</div>
+
